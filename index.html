@@ -1,0 +1,1800 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#09090b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Night Shift ROI Visual Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090b;
+      color: #f4f4f5;
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom Range Slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: #27272a;
+      height: 6px;
+      border-radius: 999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #06b6d4;
+      cursor: pointer;
+      border: 2px solid #09090b;
+      box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+    }
+    /* Flashing Emergency Alert Animation */
+    @keyframes emergencyFlash {
+      0%, 100% { background-color: rgba(220, 38, 38, 0.96); }
+      50% { background-color: rgba(9, 9, 11, 0.98); }
+    }
+    .alarm-active-bg {
+      animation: emergencyFlash 0.55s infinite;
+    }
+    /* Blackout Guard Warning Animation */
+    @keyframes blackoutFlash {
+      0%, 100% { background-color: rgba(217, 119, 6, 0.95); }
+      50% { background-color: rgba(9, 9, 11, 0.98); }
+    }
+    .blackout-active-bg {
+      animation: blackoutFlash 1s infinite;
+    }
+    /* Target Box Corner Brackets */
+    .roi-corner {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-color: #22d3ee;
+      pointer-events: none;
+    }
+    .roi-armed .roi-corner {
+      border-color: #f59e0b;
+    }
+    .roi-triggered .roi-corner {
+      border-color: #ef4444;
+    }
+    html { -webkit-tap-highlight-color: transparent; }
+    body { background: radial-gradient(120% 60% at 50% -10%, #10222b 0, #09090b 60%) fixed, #09090b; }
+    header { padding-top: max(0.5rem, env(safe-area-inset-top)); }
+    main button, header button { min-height: 40px; touch-action: manipulation; }
+    #armBtn { min-height: 68px; font-size: 1.05rem; border-radius: 1.25rem; }
+    #testSirenBtn { min-height: 68px; border-radius: 1.25rem; }
+    #hudDiffVal, #hudHoldVal, #hudLumVal, #hudBattVal { font-size: 12px; }
+    #roiResizeHandle { width: 32px; height: 32px; right: -14px; bottom: -14px; }
+    #roiResizeHandle::after { content: ''; position: absolute; inset: -8px; }
+    #roiBox.roi-armed { border-color: #f59e0b !important; background: transparent !important; box-shadow: none !important; }
+    #roiBox.roi-triggered { border-color: #ef4444 !important; background: transparent !important; box-shadow: none !important; }
+    input[type="range"] { height: 8px; touch-action: pan-y; }
+    input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; }
+    :focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      .alarm-active-bg, .blackout-active-bg { animation-duration: 1.6s; }
+      .animate-pulse, .animate-ping, .animate-bounce { animation: none; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between pb-6">
+
+  <!-- TOP TACTICAL HUD BAR -->
+  <header class="sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 px-3 py-2 flex flex-col gap-1.5">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div id="statusDot" class="w-3 h-3 rounded-full bg-zinc-500 animate-pulse"></div>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span class="font-extrabold tracking-tight text-sm text-white">ROI VISUAL MONITOR</span>
+            <span id="stateBadge" class="text-[10px] mono font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">STANDBY</span>
+          </div>
+          <p id="subStatusText" class="text-[10px] text-zinc-400">100% Offline Local Screen Watcher</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <!-- Wake Lock Status Pill -->
+        <button id="wakeLockBtn" onclick="requestWakeLock()" title="Keep Screen Awake" class="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-zinc-900 border border-zinc-800 text-zinc-400">
+          <span id="wakeIcon">🌙</span>
+          <span id="wakeText">WakeLock</span>
+        </button>
+
+        <!-- OLED Stealth Mode Button -->
+        <button onclick="toggleStealthMode(true)" class="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold bg-zinc-800 hover:bg-zinc-700 text-cyan-300 border border-zinc-700">
+          <span>🕶️</span>
+          <span>OLED Dim</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Top HUD Telemetry Strip -->
+    <div class="grid grid-cols-4 gap-1.5 pt-1 border-t border-zinc-900 text-[10px] mono">
+      <div class="bg-zinc-900/90 px-2 py-1 rounded border border-zinc-800 flex items-center justify-between">
+        <span class="text-zinc-400">DIFF</span>
+        <span id="hudDiffVal" class="text-cyan-400 font-bold">0.0%</span>
+      </div>
+      <div class="bg-zinc-900/90 px-2 py-1 rounded border border-zinc-800 flex items-center justify-between">
+        <span class="text-zinc-400">HOLD</span>
+        <span id="hudHoldVal" class="text-amber-400 font-bold">0/8</span>
+      </div>
+      <div class="bg-zinc-900/90 px-2 py-1 rounded border border-zinc-800 flex items-center justify-between">
+        <span class="text-zinc-400">LUM</span>
+        <span id="hudLumVal" class="text-emerald-400 font-bold">--</span>
+      </div>
+      <div class="bg-zinc-900/90 px-2 py-1 rounded border border-zinc-800 flex items-center justify-between">
+        <span class="text-zinc-400">BATT</span>
+        <span id="hudBattVal" class="text-zinc-200 font-bold">--%</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="flex-1 max-w-md w-full mx-auto px-3 pt-2 space-y-3">
+
+    <button id="faultBanner" onclick="ackFaults()" role="status" aria-live="polite" class="hidden w-full text-left px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-400/50 text-amber-200 text-xs font-semibold"></button>
+
+    <!-- CAMERA VIEWPORT CARD -->
+    <div class="relative rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-lg aspect-[4/3] w-full">
+      <!-- Live Video Element (scaled via CSS when using software crop/zoom fallback) -->
+      <div id="videoTransformWrapper" class="w-full h-full overflow-hidden relative flex items-center justify-center">
+        <video id="cameraVideo" autoplay playsinline muted class="w-full h-full object-cover origin-center"></video>
+      </div>
+
+      <!-- Darkened Mask Outside ROI -->
+      <div class="absolute inset-0 pointer-events-none bg-black/25"></div>
+
+      <!-- DRAGGABLE CYAN ROI TARGET BOX -->
+      <div id="roiBox" class="absolute z-20 border-2 border-cyan-400 bg-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.45)] cursor-move touch-none"
+           style="left: 30%; top: 38%; width: 40%; height: 22%;">
+        <div class="roi-corner top-0 left-0 border-t-2 border-l-2 -mt-0.5 -ml-0.5"></div>
+        <div class="roi-corner top-0 right-0 border-t-2 border-r-2 -mt-0.5 -mr-0.5"></div>
+        <div class="roi-corner bottom-0 left-0 border-b-2 border-l-2 -mb-0.5 -ml-0.5"></div>
+        <div class="roi-corner bottom-0 right-0 border-b-2 border-r-2 -mb-0.5 -mr-0.5"></div>
+        <div id="roiLabelTag" class="absolute -top-5 left-0 bg-cyan-400 text-zinc-950 font-bold mono text-[10px] px-1.5 py-[1px] rounded-t whitespace-nowrap">
+          TARGET ROI
+        </div>
+        <!-- Resize Handle bottom-right -->
+        <div id="roiResizeHandle" class="absolute -bottom-2.5 -right-2.5 w-6 h-6 bg-cyan-400 rounded-full border-2 border-zinc-950 flex items-center justify-center shadow-md">
+          <svg class="w-3 h-3 text-zinc-950" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4 20h16M20 4v16"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Floating Camera Controls Overlay -->
+      <div id="camControls" class="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2 bg-zinc-950/85 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-zinc-800/80">
+        <div class="flex items-center gap-2 flex-1">
+          <span class="text-[11px] mono text-cyan-400 whitespace-nowrap">🔍 <span id="zoomLabel">1.0x</span></span>
+          <input id="zoomSlider" type="range" min="1" max="6" step="0.1" value="1" class="w-full" oninput="handleZoomChange(this.value)" />
+        </div>
+        <button id="torchTestBtn" onclick="toggleManualTorch()" class="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-amber-300 border border-zinc-700 whitespace-nowrap" title="Test Rear LED Flash">
+          🔦 Torch
+        </button>
+        <button onclick="switchCamera()" class="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 border border-zinc-700 whitespace-nowrap">
+          Flip
+        </button>
+      </div>
+
+      <button onclick="resetRoi()" class="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-zinc-950/80 border border-zinc-700 text-[11px] text-cyan-300">⟲ Reset box</button>
+
+      <!-- Camera Permission / Error Overlay -->
+      <div id="cameraOverlayMsg" class="hidden absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center p-4 text-center z-20">
+        <p id="cameraErrorText" class="text-xs text-zinc-300 mb-3">Rear camera access is required to watch your monitor folder or alert icon.</p>
+        <button id="overlayActionBtn" onclick="initCamera()" class="px-4 py-2 rounded-lg bg-cyan-400 text-zinc-950 font-bold text-xs"><span id="overlayActionText">Enable Rear Camera</span></button>
+      </div>
+    </div>
+
+    <!-- PRIMARY ACTION BAR: ARM / RE-LOCK / TEST ALARM -->
+    <div class="grid grid-cols-3 gap-2">
+      <button id="armBtn" onclick="toggleArmMonitor()" class="col-span-2 py-3 px-4 rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 bg-cyan-400 hover:bg-cyan-300 text-zinc-950 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition">
+        <span id="armBtnIcon">🎯</span>
+        <span id="armBtnText">LOCK & ARM MONITOR</span>
+      </button>
+
+      <button id="testSirenBtn" onclick="toggleTestSiren()" class="py-3 px-3 rounded-xl font-bold text-xs bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex flex-col items-center justify-center leading-tight">
+        <span>🔊 Test</span>
+        <span class="text-[10px] text-zinc-400 font-normal">Alarm/Torch</span>
+      </button>
+    </div>
+
+    <!-- REAL-TIME PIXEL DIFF & 3 MINI PREVIEWS -->
+    <div class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 space-y-2.5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-zinc-300">ROI Pixel Shift (4-Frame Avg)</span>
+          <span id="persistenceBadge" class="text-[10px] mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">Hold: 0/8</span>
+        </div>
+        <div class="mono text-sm font-bold">
+          <span id="liveDiffValue" class="text-cyan-400">0.0%</span>
+          <span class="text-zinc-500 text-xs"> / </span>
+          <span id="thresholdReadout" class="text-amber-400 text-xs">8%</span>
+        </div>
+      </div>
+
+      <!-- Progress Bar with Threshold Marker -->
+      <div class="relative w-full h-3 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
+        <div id="diffProgressBar" class="h-full bg-cyan-400 transition-all duration-150" style="width: 0%;"></div>
+        <div id="thresholdMarker" class="absolute top-0 bottom-0 w-0.5 bg-amber-400 shadow-[0_0_6px_#f59e0b]" style="left: 16%;"></div>
+      </div>
+
+      <!-- Side-by-Side ROI Mini Canvases -->
+      <div class="grid grid-cols-3 gap-2 pt-1">
+        <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-center">
+          <p class="text-[10px] mono text-zinc-400 mb-1">1. Locked Base</p>
+          <canvas id="baselineCanvas" width="96" height="48" class="w-full h-10 bg-zinc-900 rounded object-contain"></canvas>
+        </div>
+        <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-center">
+          <p class="text-[10px] mono text-zinc-400 mb-1">2. Rolling 4f</p>
+          <canvas id="liveRoiCanvas" width="96" height="48" class="w-full h-10 bg-zinc-900 rounded object-contain"></canvas>
+        </div>
+        <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-center">
+          <p class="text-[10px] mono text-zinc-400 mb-1">3. Diff Heatmap</p>
+          <canvas id="heatmapCanvas" width="96" height="48" class="w-full h-10 bg-zinc-900 rounded object-contain"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- COLLAPSIBLE BOTTOM SETUP & TACTICAL FEATURES DRAWER -->
+    <details class="bg-zinc-900/95 border border-zinc-800 rounded-xl p-3 group space-y-3">
+      <summary class="text-xs font-bold uppercase tracking-wider text-cyan-400 cursor-pointer flex items-center justify-between">
+        <span>⚙️ Controls, Audio & Night-Shift Guards</span>
+        <span class="text-zinc-500 group-open:rotate-180 transition">▼</span>
+      </summary>
+
+      <div class="pt-2 space-y-3 border-t border-zinc-800">
+        <!-- Quick Re-Snap Button & Custom ROI Label -->
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 flex-1">
+            <span class="text-[11px] text-zinc-400 whitespace-nowrap">Label:</span>
+            <input id="roiNameInput" type="text" value="PROD_FAIL" maxlength="16"
+                   oninput="updateRoiLabel(this.value)"
+                   class="w-full px-2 py-1 rounded bg-zinc-950 border border-zinc-800 text-xs mono text-zinc-200 focus:border-cyan-400 outline-none" />
+          </div>
+          <button onclick="recaptureBaseline()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] font-semibold text-cyan-300 border border-zinc-700 whitespace-nowrap">
+            🔄 Re-Snap Base
+          </button>
+          <button onclick="resetRoi()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] font-semibold text-amber-300 border border-zinc-700 whitespace-nowrap">
+            ⤾ Reset ROI
+          </button>
+        </div>
+
+        <!-- Alarm Sound & Voice TTS Selector -->
+        <div class="space-y-1">
+          <label class="block text-xs font-semibold text-zinc-300">🔊 Alarm Sound Mode</label>
+          <select id="soundModeSelect" onchange="saveLocalPrefs()" class="w-full px-2.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:border-cyan-400 outline-none">
+            <option value="police">🚨 Dual-Tone Police Siren (Loudest)</option>
+            <option value="beep">📟 High-Pitch Double Pager Beep</option>
+            <option value="sonar">🌊 Submarine Sonar Ping</option>
+            <option value="voice">🗣️ Spoken Voice TTS ("Alert! Mail folder changed!")</option>
+          </select>
+        </div>
+
+        <div class="space-y-1">
+          <label class="block text-xs font-semibold text-zinc-300">📢 Alarm Loudness</label>
+          <select id="loudnessSelect" onchange="try{localStorage.setItem('roi_loudness',this.value)}catch(e){}" class="w-full px-2.5 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:border-cyan-400 outline-none">
+            <option value="max">Maximum from the first second</option>
+            <option value="ramp">Gentle start, ramps to loud over 15 s</option>
+          </select>
+          <p class="text-[10px] text-zinc-500">Also set phone media volume to max. A web page cannot raise it.</p>
+        </div>
+
+        <label class="flex items-center justify-between bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 cursor-pointer">
+          <div>
+            <p class="text-xs font-semibold text-zinc-200">🔒 Lock camera exposure when armed</p>
+            <p class="text-[10px] text-zinc-400">Experimental. Leave off if the picture looks dim or blurry.</p>
+          </div>
+          <input id="expLockToggle" type="checkbox" class="w-4 h-4 accent-cyan-400 rounded" />
+        </label>
+        <label class="flex items-center justify-between bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 cursor-pointer">
+          <div>
+            <p class="text-xs font-semibold text-zinc-200">🔌 Charger alerts</p>
+            <p class="text-[10px] text-zinc-400">Warns if the phone is not charging for 10 s while armed. The top bar shows ⚡ when charging.</p>
+          </div>
+          <input id="chargerAlertToggle" type="checkbox" checked onchange="scheduleChargerCheck()" class="w-4 h-4 accent-cyan-400 rounded" />
+        </label>
+
+        <!-- Sensitivity Threshold Slider -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs">
+            <span class="text-zinc-300">Trigger Threshold (% pixel change)</span>
+            <span id="thresholdLabel" class="mono text-amber-400 font-bold">8%</span>
+          </div>
+          <input id="thresholdSlider" type="range" min="2" max="50" step="1" value="8" class="w-full" oninput="updateThreshold(this.value)" />
+          <p class="text-[10px] text-zinc-500">Lower = catches small "(1)" badges. Higher = ignores ambient glare.</p>
+        </div>
+
+        <!-- Consecutive Checks Slider (Anti-Mouse-Pass) -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs">
+            <span class="text-zinc-300">Hold Delay (Anti-Cursor Pass)</span>
+            <span id="confirmLabel" class="mono text-cyan-400 font-bold">8 frames (2.0s)</span>
+          </div>
+          <input id="confirmSlider" type="range" min="2" max="20" step="1" value="8" class="w-full" oninput="updateConfirmChecks(this.value)" />
+        </div>
+
+        <!-- UPGRADED LOCAL HARDWARE TOGGLES -->
+        <div class="space-y-2 pt-2 border-t border-zinc-800">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Hardware & Smart Guards</p>
+
+          <!-- 1. Rear LED Torch Strobe -->
+          <label class="flex items-center justify-between bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 cursor-pointer">
+            <div>
+              <p class="text-xs font-semibold text-zinc-200">🔦 Rear LED Flashlight Strobe</p>
+              <p class="text-[10px] text-zinc-400">Strobes camera LED flash when alarm triggers</p>
+            </div>
+            <input id="torchStrobeToggle" type="checkbox" checked onchange="saveLocalPrefs()" class="w-4 h-4 accent-cyan-400 rounded" />
+          </label>
+
+          <!-- 2. Clap / Shout Remote Snooze -->
+          <div class="bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 space-y-1.5">
+            <label class="flex items-center justify-between cursor-pointer">
+              <div>
+                <p class="text-xs font-semibold text-zinc-200">👏 Clap / Shout Remote Snooze & Re-Arm</p>
+                <p class="text-[10px] text-zinc-400">Clap twice or shout from bed to silence & re-lock ROI</p>
+              </div>
+              <input id="clapSnoozeToggle" type="checkbox" checked onchange="toggleClapListener(this.checked)" class="w-4 h-4 accent-cyan-400 rounded" />
+            </label>
+            <div class="flex items-center justify-between text-[10px] mono text-zinc-400 pt-1">
+              <span>Mic Peak: <span id="micLevelVal" class="text-cyan-400">0%</span></span>
+              <span>Spikes: <span id="clapCountVal" class="text-amber-400">0/2</span></span>
+            </div>
+          </div>
+
+          <!-- 3. Laptop Screen Sleep / Blackout Guard -->
+          <div class="bg-zinc-950/80 p-2 rounded-lg border border-zinc-800/80 space-y-1.5">
+            <label class="flex items-center justify-between cursor-pointer">
+              <div>
+                <p class="text-xs font-semibold text-zinc-200">🖥️ Laptop Screen Sleep Guard (Dead-Man's Switch)</p>
+                <p class="text-[10px] text-zinc-400">Gentle chime if laptop screen locks or turns black</p>
+              </div>
+              <input id="blackoutGuardToggle" type="checkbox" checked onchange="saveLocalPrefs()" class="w-4 h-4 accent-cyan-400 rounded" />
+            </label>
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-zinc-400">Min Screen Luminance Cutoff</span>
+              <span id="blackoutCutoffLabel" class="mono text-amber-400 font-bold">18 / 255</span>
+            </div>
+            <input id="blackoutSlider" type="range" min="5" max="60" step="1" value="18" class="w-full" oninput="updateBlackoutCutoff(this.value)" />
+          </div>
+        </div>
+
+        <!-- Fine-Tune ROI Sliders Accordion -->
+        <details class="group pt-1 border-t border-zinc-800">
+          <summary class="text-xs font-semibold text-zinc-300 cursor-pointer flex items-center justify-between py-1">
+            <span>🎯 One-Handed ROI Box Fine Sliders</span>
+            <span class="text-zinc-500 group-open:rotate-180 transition">▼</span>
+          </summary>
+          <div class="grid grid-cols-2 gap-2.5 pt-2 text-[11px]">
+            <div>
+              <label class="text-zinc-400 flex justify-between"><span>X Pos</span><span id="roiXVal" class="mono">30%</span></label>
+              <input id="roiXSlider" type="range" min="2" max="85" value="30" class="w-full mt-1" oninput="updateRoiFromSliders()" />
+            </div>
+            <div>
+              <label class="text-zinc-400 flex justify-between"><span>Y Pos</span><span id="roiYVal" class="mono">38%</span></label>
+              <input id="roiYSlider" type="range" min="2" max="85" value="38" class="w-full mt-1" oninput="updateRoiFromSliders()" />
+            </div>
+            <div>
+              <label class="text-zinc-400 flex justify-between"><span>Width</span><span id="roiWVal" class="mono">40%</span></label>
+              <input id="roiWSlider" type="range" min="10" max="80" value="40" class="w-full mt-1" oninput="updateRoiFromSliders()" />
+            </div>
+            <div>
+              <label class="text-zinc-400 flex justify-between"><span>Height</span><span id="roiHVal" class="mono">22%</span></label>
+              <input id="roiHSlider" type="range" min="8" max="60" value="22" class="w-full mt-1" oninput="updateRoiFromSliders()" />
+            </div>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <!-- SHIFT TRIGGER HISTORY LOG (WITH CROPPED SNAPSHOTS) -->
+    <div class="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 space-y-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-zinc-400">Local Trigger History Log</h2>
+          <span id="logCountBadge" class="text-[10px] mono px-1.5 py-0.5 rounded bg-zinc-800 text-cyan-400">0</span>
+        </div>
+        <button onclick="clearEventLog()" class="text-[11px] text-zinc-500 hover:text-zinc-300">Clear History</button>
+      </div>
+      <div id="eventLogList" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+        <p id="emptyLogMsg" class="text-xs text-zinc-500 italic py-2 text-center">No triggers recorded this shift.</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- STEALTH / OLED NIGHT SAVER OVERLAY (95% Pitch Black) -->
+  <div id="stealthOverlay" onclick="toggleStealthMode(false)" class="hidden fixed inset-0 bg-black/95 z-40 flex flex-col items-center justify-center p-6 text-center cursor-pointer">
+    <div class="w-2.5 h-2.5 rounded-full bg-cyan-500/60 animate-ping mb-4"></div>
+    <p class="text-zinc-500 font-bold text-xs tracking-widest uppercase">Stealth OLED Monitoring Active</p>
+    <p id="stealthDiffText" class="mono text-zinc-600 text-xs mt-1">Diff: 0.0% | Lum: -- | Batt: --%</p>
+    <p class="text-[10px] text-zinc-700 mt-4">Tap anywhere to restore full HUD</p>
+  </div>
+
+  <!-- LAPTOP SCREEN BLACKOUT WARNING BANNER MODAL -->
+  <div id="blackoutModal" role="alertdialog" aria-modal="true" aria-live="polite" class="hidden fixed inset-0 z-50 blackout-active-bg flex flex-col items-center justify-between p-6 text-center">
+    <div class="w-full flex justify-between items-center text-xs mono text-amber-200">
+      <span>🖥️ DEAD-MAN'S SWITCH</span>
+      <span id="blackoutTimeText">--:--:--</span>
+    </div>
+    <div class="space-y-3 my-auto max-w-xs w-full">
+      <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-amber-500/20 border-2 border-amber-300 text-3xl">
+        🌑
+      </div>
+      <h2 class="text-2xl font-black text-white uppercase">Laptop Screen Dark / Locked!</h2>
+      <p id="blackoutDetailText" class="text-xs text-amber-100 leading-relaxed">
+        Monitor luminance dropped near zero. Wake up your office laptop so incoming mail alerts remain visible.
+      </p>
+    </div>
+    <button onclick="dismissBlackoutAlert()" class="w-full max-w-xs py-3.5 rounded-xl bg-white text-zinc-950 font-black text-sm uppercase shadow-xl">
+      ✅ Laptop Awake — Resume Watching
+    </button>
+  </div>
+
+  <!-- FULL-SCREEN FLASHING ALARM MODAL -->
+  <div id="alarmModal" role="alertdialog" aria-modal="true" aria-live="assertive" class="hidden fixed inset-0 z-50 alarm-active-bg flex flex-col items-center justify-between p-6 text-center">
+    <div class="w-full flex justify-between items-center text-xs mono text-red-200">
+      <span>🚨 VISUAL ROI TRIGGER</span>
+      <span id="alarmTimeText">--:--:--</span>
+    </div>
+
+    <div class="space-y-3 my-auto max-w-xs w-full">
+      <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-600/30 border-2 border-white text-4xl animate-bounce">
+        🚨
+      </div>
+      <h1 id="alarmTitleBanner" class="text-2xl font-black tracking-tight text-white uppercase drop-shadow">
+        TARGET CHANGE DETECTED!
+      </h1>
+      <p id="alarmDetailText" class="text-xs text-red-100 font-medium">
+        Visual change persisted inside your locked ROI box.
+      </p>
+
+      <!-- Clap / Shout Remote Snooze Status Pill -->
+      <div id="clapModalHint" class="bg-black/50 border border-red-400/40 rounded-lg px-3 py-1.5 text-[11px] mono text-amber-300">
+        👏 Clap twice or shout loudly to snooze & re-arm remotely!
+      </div>
+
+      <!-- Snapshot of the Triggered Folder -->
+      <div class="bg-zinc-950/90 p-2 rounded-xl border border-red-400/50">
+        <p class="text-[10px] mono text-red-300 mb-1 uppercase">Captured ROI Trigger Snapshot</p>
+        <img id="alarmSnapshotImg" alt="Triggered ROI" class="w-full h-20 object-contain rounded bg-black" />
+      </div>
+    </div>
+
+    <div class="w-full max-w-xs space-y-2.5">
+      <button onclick="acknowledgeAndReArm()" class="w-full py-4 rounded-xl bg-white text-red-950 font-black text-base uppercase tracking-wide shadow-2xl">
+        ✅ Snooze & Re-Lock Baseline
+      </button>
+      <button onclick="disarmFromAlarm()" class="w-full py-2.5 rounded-xl bg-zinc-900/90 text-zinc-200 font-semibold text-xs border border-zinc-700">
+        Stop Alarm & Return to Standby
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /********************************************************************
+     * STATE & CONFIGURATION (100% OFFLINE / LOCAL)
+     ********************************************************************/
+    const state = {
+      isArmed: false,
+      isAlarming: false,
+      isBlackoutAlert: false,
+      isTestSiren: false,
+      sirenMuted: false,
+      faults: {}, faultTimer: null, chargerTimer: null, micFloor: 5, micTimer: null, holdOffUntil: 0, blackoutOk: 0,
+      wdLastTime: -1, wdStale: 0,
+      savedZoom: null, resumeArm: false, persistReady: false,
+      master: null, escTimer: null, alarmStart: 0, escalated: false, modeOverride: null,
+      mutedAt: 0,
+      gapTimer: null,
+      facingMode: 'environment',
+      stream: null,
+      videoTrack: null,
+      supportsHardwareZoom: false,
+      supportsTorch: false,
+      manualTorchOn: false,
+      zoomLevel: 1.0,
+      roiLabel: 'PROD_FAIL',
+      roi: { x: 0.30, y: 0.38, w: 0.40, h: 0.22 },
+      thresholdPct: 8,
+      confirmRequired: 8, // 8 * 250ms = 2.0 seconds
+      consecutiveHits: 0,
+      blackoutCutoff: 18,
+      blackoutHits: 0,
+      currentLum: 0,
+      frameBuffer: [], // 4-frame rolling grayscale average
+      baselineFrame: null,
+      baselineLum: 0,
+      sampleW: 96,
+      sampleH: 48,
+      wakeLock: null,
+      audioCtx: null,
+      sirenInterval: null,
+      vibrationInterval: null,
+      torchInterval: null,
+      // Microphone Clap/Shout detection state
+      micStream: null,
+      micAnalyser: null,
+      micDenied: false,
+      clapSpikes: 0,
+      lastClapTime: 0,
+      // Battery telemetry
+      batteryPct: null,
+      batteryCharging: false,
+      lowBattWarned: false,
+      triggerCount: 0
+    };
+
+    // DOM Elements
+    const video = document.getElementById('cameraVideo');
+    const roiBox = document.getElementById('roiBox');
+    const baselineCanvas = document.getElementById('baselineCanvas');
+    const liveRoiCanvas = document.getElementById('liveRoiCanvas');
+    const heatmapCanvas = document.getElementById('heatmapCanvas');
+    const baseCtx = baselineCanvas.getContext('2d', { willReadFrequently: true });
+    const liveCtx = liveRoiCanvas.getContext('2d', { willReadFrequently: true });
+    const heatCtx = heatmapCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Offscreen canvas for sampling the video stream
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = state.sampleW;
+    sampleCanvas.height = state.sampleH;
+    const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+    /********************************************************************
+     * 1. CAMERA INITIALIZATION, HARDWARE ZOOM & TORCH CAPABILITY
+     ********************************************************************/
+    async function initCamera() {
+      const overlay = document.getElementById('cameraOverlayMsg');
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Camera API unavailable. Open this page over HTTPS (or localhost) in Chrome.');
+        }
+        if (state.stream) {
+          state.stream.getTracks().forEach(t => t.stop());
+          state.stream = null;
+        }
+
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: { ideal: state.facingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.stream = stream;
+        state.frameBuffer = [];
+        state.baselineFrame = null;
+        video.srcObject = stream;
+        overlay.classList.add('hidden');
+
+        const [track] = stream.getVideoTracks();
+        if (!track) throw new Error('Camera returned no video track.');
+        state.videoTrack = track;
+
+        // A camera that dies later (screen lock, USB unplug, another app) leaves a frozen
+        // picture; flag it so the watchdog restarts instead of silently reporting "no change".
+        track.onended = () => {
+          state.wdStale = 0;
+          if (state.isArmed) {
+            setFault('camera', 'Camera stream ended. Reconnecting...');
+            initCamera();
+          }
+        };
+
+        const capabilities = (typeof track.getCapabilities === 'function' ? track.getCapabilities() : null) || {};
+        if (capabilities.zoom && typeof capabilities.zoom.max === 'number') {
+          state.supportsHardwareZoom = true;
+          const zoomSlider = document.getElementById('zoomSlider');
+          zoomSlider.min = capabilities.zoom.min || 1;
+          zoomSlider.max = Math.min(capabilities.zoom.max || 6, 8);
+          zoomSlider.step = capabilities.zoom.step || 0.1;
+        } else {
+          state.supportsHardwareZoom = false;
+          video.style.transform = '';
+        }
+
+        state.supportsTorch = Boolean(capabilities.torch);
+        afterCameraReady();
+      } catch (err) {
+        state.videoTrack = null;
+        overlay.classList.remove('hidden');
+        const reason = err && err.name === 'NotAllowedError'
+          ? 'Camera permission denied. Allow it in the browser site settings, then tap again.'
+          : (err && err.message) || 'Please allow camera permission in Chrome.';
+        document.getElementById('cameraErrorText').textContent = 'Camera error: ' + reason;
+      }
+    }
+
+    function roiSourceRect() {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const cw = video.clientWidth || 1, ch = video.clientHeight || 1;
+      if (!vw || !vh) return { sx: 0, sy: 0, sw: 0, sh: 0 };
+      const z = state.supportsHardwareZoom ? 1 : state.zoomLevel;
+      const sc = Math.max(cw / vw, ch / vh); // object-cover scale
+      const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
+      const map = (x, y) => [((cw / 2 + (x - cw / 2) / z) - ox) / sc, ((ch / 2 + (y - ch / 2) / z) - oy) / sc];
+      const [x0, y0] = map(state.roi.x * cw, state.roi.y * ch);
+      const [x1, y1] = map((state.roi.x + state.roi.w) * cw, (state.roi.y + state.roi.h) * ch);
+      // Clamp to the real frame: a software-zoom ROI near the edge can land outside the
+      // source rect, and drawImage then throws IndexSizeError on every frame.
+      const cx0 = Math.max(0, Math.min(vw, x0));
+      const cy0 = Math.max(0, Math.min(vh, y0));
+      const cx1 = Math.max(0, Math.min(vw, x1));
+      const cy1 = Math.max(0, Math.min(vh, y1));
+      return { sx: cx0, sy: cy0, sw: Math.max(1, cx1 - cx0), sh: Math.max(1, cy1 - cy0) };
+    }
+
+    async function lockCameraExposure(on) {
+      // Freeze exposure at the values the camera is ALREADY using. Never touch focus (manual focus caused blur).
+      const t = state.videoTrack;
+      if (!t || typeof t.getCapabilities !== 'function') return;
+      let c = {};
+      try { c = t.getCapabilities() || {}; } catch (e) { return; }
+      const st = t.getSettings ? t.getSettings() : {};
+      let adv = null;
+      if (on && document.getElementById('expLockToggle').checked) {
+        if (c.exposureMode && c.exposureMode.includes('manual') && typeof st.exposureTime === 'number' && st.exposureTime > 0) {
+          adv = { exposureMode: 'manual', exposureTime: st.exposureTime };
+          if (c.iso && typeof st.iso === 'number') adv.iso = st.iso;
+        }
+      } else if (c.exposureMode && c.exposureMode.includes('continuous')) {
+        adv = { exposureMode: 'continuous' };
+      }
+      if (adv) { try { await t.applyConstraints({ advanced: [adv] }); } catch (e) {} }
+    }
+
+    function switchCamera() {
+      state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment';
+      initCamera();
+    }
+
+    function handleZoomChange(val) {
+      const zoom = Math.min(8, Math.max(1, parseFloat(val) || 1));
+      state.zoomLevel = zoom;
+      document.getElementById('zoomLabel').textContent = zoom.toFixed(1) + 'x';
+
+      if (state.supportsHardwareZoom && state.videoTrack) {
+        state.videoTrack.applyConstraints({ advanced: [{ zoom: zoom }] }).catch(() => {});
+        video.style.transform = 'scale(1)';
+      } else {
+        video.style.transform = `scale(${zoom})`;
+      }
+      if (state.isArmed) recaptureBaseline();
+    }
+
+    async function setTorchState(on) {
+      if (!state.videoTrack) return;
+      try {
+        await state.videoTrack.applyConstraints({ advanced: [{ torch: Boolean(on) }] });
+      } catch (e) {
+        // Torch unsupported on this lens or desktop browser
+      }
+    }
+
+    function toggleManualTorch() {
+      state.manualTorchOn = !state.manualTorchOn;
+      setTorchState(state.manualTorchOn);
+      const btn = document.getElementById('torchTestBtn');
+      btn.className = state.manualTorchOn
+        ? 'px-2 py-1 rounded bg-amber-400 text-zinc-950 text-[11px] font-bold border border-amber-300 whitespace-nowrap'
+        : 'px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-amber-300 border border-zinc-700 whitespace-nowrap';
+    }
+
+    function startTorchStrobe() {
+      stopTorchStrobe();
+      if (!document.getElementById('torchStrobeToggle').checked) return;
+      let flashOn = true;
+      setTorchState(true);
+      state.torchInterval = setInterval(() => {
+        flashOn = !flashOn;
+        setTorchState(flashOn);
+      }, 300);
+    }
+
+    function stopTorchStrobe() {
+      if (state.torchInterval) {
+        clearInterval(state.torchInterval);
+        state.torchInterval = null;
+      }
+      setTorchState(state.manualTorchOn);
+    }
+
+    /********************************************************************
+     * 2. TOUCH-DRAGGABLE & RESIZABLE ROI TARGET BOX
+     ********************************************************************/
+    function updateRoiLabel(val) {
+      state.roiLabel = (val || 'TARGET').trim();
+      document.getElementById('roiLabelTag').textContent = 'ROI: ' + state.roiLabel;
+      saveLocalPrefs();
+    }
+
+    // Single source of truth for ROI clamping. Replacing a non-finite ROI with the
+    // default object prevents later writes (e.g. Object.assign(state.roi, saved))
+    // from throwing on a frozen/primitive value.
+    function clampRoi() {
+      const d = { x: 0.30, y: 0.38, w: 0.40, h: 0.22 };
+      if (!state.roi || ![state.roi.x, state.roi.y, state.roi.w, state.roi.h].every(Number.isFinite)) state.roi = { ...d };
+      const r = state.roi;
+      r.w = Math.min(Math.max(r.w, 0.10), 0.96);
+      r.h = Math.min(Math.max(r.h, 0.08), 0.90);
+      r.x = Math.min(Math.max(r.x, 0.02), 0.98 - r.w);
+      r.y = Math.min(Math.max(r.y, 0.02), 0.96 - r.h);
+    }
+
+    const DEFAULT_ROI = { x: 0.30, y: 0.38, w: 0.40, h: 0.22 };
+
+    function resetRoi() {
+      // Mutate in place so every holder of state.roi stays valid.
+      Object.assign(state.roi, DEFAULT_ROI);
+      syncRoiUI();
+      if (state.isArmed) recaptureBaseline();
+    }
+
+    function syncRoiUI() {
+      clampRoi();
+      roiBox.style.left = (state.roi.x * 100).toFixed(1) + '%';
+      roiBox.style.top = (state.roi.y * 100).toFixed(1) + '%';
+      roiBox.style.width = (state.roi.w * 100).toFixed(1) + '%';
+      roiBox.style.height = (state.roi.h * 100).toFixed(1) + '%';
+
+      document.getElementById('roiXSlider').value = Math.round(state.roi.x * 100);
+      document.getElementById('roiYSlider').value = Math.round(state.roi.y * 100);
+      document.getElementById('roiWSlider').value = Math.round(state.roi.w * 100);
+      document.getElementById('roiHSlider').value = Math.round(state.roi.h * 100);
+
+      document.getElementById('roiXVal').textContent = Math.round(state.roi.x * 100) + '%';
+      document.getElementById('roiYVal').textContent = Math.round(state.roi.y * 100) + '%';
+      document.getElementById('roiWVal').textContent = Math.round(state.roi.w * 100) + '%';
+      document.getElementById('roiHVal').textContent = Math.round(state.roi.h * 100) + '%';
+    }
+
+    function updateRoiFromSliders() {
+      state.roi.x = parseInt(document.getElementById('roiXSlider').value, 10) / 100;
+      state.roi.y = parseInt(document.getElementById('roiYSlider').value, 10) / 100;
+      state.roi.w = parseInt(document.getElementById('roiWSlider').value, 10) / 100;
+      state.roi.h = parseInt(document.getElementById('roiHSlider').value, 10) / 100;
+
+      if (state.roi.x + state.roi.w > 0.98) state.roi.x = 0.98 - state.roi.w;
+      if (state.roi.y + state.roi.h > 0.98) state.roi.y = 0.98 - state.roi.h;
+      syncRoiUI();
+      if (state.isArmed) recaptureBaseline();
+    }
+
+    (function setupRoiInteractions() {
+      let mode = null;
+      let startX = 0, startY = 0;
+      let initRoi = {};
+
+      const container = roiBox.parentElement;
+      const resizeHandle = document.getElementById('roiResizeHandle');
+
+      function onStart(e) {
+        const touch = e.touches ? e.touches[0] : e;
+        mode = (e.target === resizeHandle || resizeHandle.contains(e.target)) ? 'resize' : 'drag';
+        startX = touch.clientX;
+        startY = touch.clientY;
+        initRoi = { ...state.roi };
+        e.stopPropagation();
+      }
+
+      function onMove(e) {
+        if (!mode) return;
+        const touch = e.touches ? e.touches[0] : e;
+        const rect = container.getBoundingClientRect();
+        const dx = (touch.clientX - startX) / rect.width;
+        const dy = (touch.clientY - startY) / rect.height;
+
+        if (mode === 'drag') {
+          state.roi.x = Math.max(0.02, Math.min(0.98 - state.roi.w, initRoi.x + dx));
+          state.roi.y = Math.max(0.02, Math.min(0.98 - state.roi.h, initRoi.y + dy));
+        } else if (mode === 'resize') {
+          state.roi.w = Math.max(0.10, Math.min(0.96 - state.roi.x, initRoi.w + dx));
+          state.roi.h = Math.max(0.08, Math.min(0.96 - state.roi.y, initRoi.h + dy));
+        }
+        syncRoiUI();
+      }
+
+      function onEnd() {
+        if (mode && state.isArmed) {
+          recaptureBaseline();
+        }
+        mode = null;
+      }
+
+      roiBox.addEventListener('touchstart', onStart, { passive: true });
+      window.addEventListener('touchmove', onMove, { passive: true });
+      window.addEventListener('touchend', onEnd);
+
+      roiBox.addEventListener('mousedown', onStart);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onEnd);
+    })();
+
+    /********************************************************************
+     * 3. 4-FRAME ROLLING PIXEL-DIFF ENGINE & BLACKOUT GUARD
+     ********************************************************************/
+    function extractRoiPixels() {
+      if (!video.videoWidth || !video.videoHeight) return null;
+
+      const { sx, sy, sw, sh } = roiSourceRect();
+
+      sampleCtx.drawImage(video, sx, sy, sw, sh, 0, 0, state.sampleW, state.sampleH);
+      const imgData = sampleCtx.getImageData(0, 0, state.sampleW, state.sampleH);
+      const data = imgData.data;
+
+      const gray = new Uint8ClampedArray(state.sampleW * state.sampleH);
+      let lumSum = 0;
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        gray[j] = lum;
+        lumSum += lum;
+      }
+      state.currentLum = Math.round(lumSum / gray.length);
+      return gray;
+    }
+
+    function renderGrayscaleToCanvas(grayArray, ctx) {
+      const imgData = ctx.createImageData(state.sampleW, state.sampleH);
+      for (let i = 0, j = 0; j < grayArray.length; i += 4, j++) {
+        const v = grayArray[j];
+        imgData.data[i] = v;
+        imgData.data[i + 1] = v;
+        imgData.data[i + 2] = v;
+        imgData.data[i + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    function recaptureBaseline() {
+      const currentGray = getAveragedFrame();
+      if (!currentGray) return;
+      state.baselineFrame = new Uint8ClampedArray(currentGray);
+      state.baselineLum = state.currentLum;
+      state.holdOffUntil = Date.now() + 800;
+      state.consecutiveHits = 0;
+      state.blackoutHits = 0;
+      renderGrayscaleToCanvas(state.baselineFrame, baseCtx);
+    }
+
+    function getAveragedFrame() {
+      if (state.frameBuffer.length === 0) return null;
+      const len = state.frameBuffer[0].length;
+      const avg = new Uint8ClampedArray(len);
+      const count = state.frameBuffer.length;
+
+      for (let i = 0; i < len; i++) {
+        let sum = 0;
+        for (let f = 0; f < count; f++) {
+          sum += state.frameBuffer[f][i];
+        }
+        avg[i] = sum / count;
+      }
+      return avg;
+    }
+
+    // Core 250ms (4 FPS) Monitoring Loop
+    let monitorBusy = false;
+    let depthTimer = 0;   // consecutive lighting-change frames
+    setInterval(() => {
+      // Skip overlapping ticks: rAF-driven video plus a slow canvas readback can make one
+      // tick outlive the next, which would interleave writes to the shared frame buffer.
+      if (monitorBusy) return;
+      monitorBusy = true;
+      try {
+        runMonitorTick();
+      } catch (err) {
+        // One bad frame must never stop the watcher for the rest of the shift.
+        console.warn('Monitor tick failed', err);
+      } finally {
+        monitorBusy = false;
+      }
+    }, 250);
+
+    function runMonitorTick() {
+      const rawGray = extractRoiPixels();
+      if (!rawGray) return;
+
+      state.frameBuffer.push(rawGray);
+      if (state.frameBuffer.length > 4) state.frameBuffer.shift();
+
+      const avgGray = getAveragedFrame();
+      if (!avgGray) return;
+      renderGrayscaleToCanvas(avgGray, liveCtx);
+
+      // A stale or reshaped baseline (zoom/ROI change) would throw on every frame below.
+      if (!state.baselineFrame || state.baselineFrame.length !== avgGray.length) {
+        state.baselineFrame = new Uint8ClampedArray(avgGray);
+        state.baselineLum = state.currentLum;
+        renderGrayscaleToCanvas(state.baselineFrame, baseCtx);
+      }
+
+      // Mean Luminance Normalization
+      let sumBase = 0, sumLive = 0;
+      const totalPixels = avgGray.length;
+      for (let i = 0; i < totalPixels; i++) {
+        sumBase += state.baselineFrame[i];
+        sumLive += avgGray[i];
+      }
+      const lumShift = (sumLive - sumBase) / totalPixels;
+
+      // Pixel-by-pixel comparison & Heatmap
+      const heatImg = heatCtx.createImageData(state.sampleW, state.sampleH);
+      let changedPixels = 0;
+      const pixelDiffCutoff = 25;
+
+      for (let i = 0, p = 0; i < totalPixels; i++, p += 4) {
+        const correctedLive = avgGray[i] - lumShift;
+        const delta = Math.abs(correctedLive - state.baselineFrame[i]);
+
+        if (delta > pixelDiffCutoff) {
+          changedPixels++;
+          heatImg.data[p] = 239;
+          heatImg.data[p + 1] = 68;
+          heatImg.data[p + 2] = 68;
+          heatImg.data[p + 3] = 255;
+        } else {
+          const dim = avgGray[i] * 0.25;
+          heatImg.data[p] = dim;
+          heatImg.data[p + 1] = dim;
+          heatImg.data[p + 2] = dim;
+          heatImg.data[p + 3] = 255;
+        }
+      }
+      heatCtx.putImageData(heatImg, 0, 0);
+
+      const diffPct = (changedPixels / totalPixels) * 100;
+      updateTelemetryHUD(diffPct);
+
+      // Check Laptop Screen Blackout Guard ("Dead-Man's Switch")
+      // Laptop screen woke up by itself: clear the amber alert and re-baseline
+      if (state.isBlackoutAlert) {
+        if (state.currentLum >= state.blackoutCutoff * 1.3) {
+          if (++state.blackoutOk >= 8) { state.blackoutOk = 0; dismissBlackoutAlert(); }
+        } else state.blackoutOk = 0;
+      }
+      if (state.isArmed && !state.isAlarming && !state.isBlackoutAlert && Date.now() >= state.holdOffUntil) {
+        const guardEnabled = document.getElementById('blackoutGuardToggle').checked;
+        if (guardEnabled && state.currentLum < state.blackoutCutoff) {
+          state.blackoutHits++;
+          if (state.blackoutHits >= 12) { // 3 seconds of darkness
+            triggerBlackoutWarning();
+            return;
+          }
+        } else {
+          state.blackoutHits = Math.max(0, state.blackoutHits - 1);
+        }
+
+        // Standard ROI Pixel Diff Trigger
+        const screenDim = state.currentLum < state.blackoutCutoff * 1.6;
+
+        // Room lighting / monitor auto-brightness ramps change every pixel at once. Waiting for
+        // the diff to fade never happens in that case, so snooze & re-lock instead of alarming.
+        const baselineLum = state.baselineLum;
+        const lightingJump = baselineLum > 0 && Math.abs(state.currentLum - baselineLum) / baselineLum > 0.6;
+        if (lightingJump && diffPct >= state.thresholdPct) {
+          if (++depthTimer >= 8) {
+            depthTimer = 0;
+            recaptureBaseline();
+            document.getElementById('subStatusText').textContent = 'Lighting changed - baseline re-locked.';
+          }
+        } else {
+          depthTimer = 0;
+          if (!screenDim && diffPct >= state.thresholdPct) {
+            state.consecutiveHits++;
+          } else {
+            state.consecutiveHits = Math.max(0, state.consecutiveHits - 1);
+          }
+        }
+
+        const holdStr = `${state.consecutiveHits}/${state.confirmRequired}`;
+        document.getElementById('persistenceBadge').textContent = `Hold: ${holdStr}`;
+        document.getElementById('hudHoldVal').textContent = holdStr;
+
+        if (state.consecutiveHits >= state.confirmRequired) {
+          triggerEmergencyAlarm(diffPct);
+        }
+      }
+    }
+
+    function updateTelemetryHUD(diffPct) {
+      const formatted = diffPct.toFixed(1) + '%';
+      const valEl = document.getElementById('liveDiffValue');
+      const hudDiff = document.getElementById('hudDiffVal');
+      const hudLum = document.getElementById('hudLumVal');
+      const barEl = document.getElementById('diffProgressBar');
+      const stealthText = document.getElementById('stealthDiffText');
+
+      valEl.textContent = formatted;
+      hudDiff.textContent = formatted;
+      hudLum.textContent = state.currentLum;
+
+      const battStr = state.batteryPct !== null ? `${state.batteryPct}%` : '--%';
+      stealthText.textContent = `Diff: ${formatted} | Lum: ${state.currentLum} | Batt: ${battStr}`;
+
+      const barWidth = Math.min(100, (diffPct / 50) * 100);
+      barEl.style.width = barWidth + '%';
+
+      if (diffPct >= state.thresholdPct) {
+        valEl.className = 'text-red-400';
+        hudDiff.className = 'text-red-400 font-bold';
+        barEl.className = 'h-full bg-red-500 transition-all duration-150';
+      } else {
+        valEl.className = 'text-cyan-400';
+        hudDiff.className = 'text-cyan-400 font-bold';
+        barEl.className = 'h-full bg-cyan-400 transition-all duration-150';
+      }
+    }
+
+    function updateThreshold(val) {
+      state.thresholdPct = parseInt(val, 10);
+      document.getElementById('thresholdLabel').textContent = state.thresholdPct + '%';
+      document.getElementById('thresholdReadout').textContent = state.thresholdPct + '%';
+      document.getElementById('thresholdMarker').style.left = Math.min(100, (state.thresholdPct / 50) * 100) + '%';
+      saveLocalPrefs();
+    }
+
+    function updateConfirmChecks(val) {
+      state.confirmRequired = parseInt(val, 10);
+      const seconds = (state.confirmRequired * 0.25).toFixed(1);
+      document.getElementById('confirmLabel').textContent = `${state.confirmRequired} frames (${seconds}s)`;
+      const holdStr = `${state.consecutiveHits}/${state.confirmRequired}`;
+      document.getElementById('persistenceBadge').textContent = `Hold: ${holdStr}`;
+      document.getElementById('hudHoldVal').textContent = holdStr;
+      saveLocalPrefs();
+    }
+
+    function updateBlackoutCutoff(val) {
+      state.blackoutCutoff = parseInt(val, 10);
+      document.getElementById('blackoutCutoffLabel').textContent = `${state.blackoutCutoff} / 255`;
+      saveLocalPrefs();
+    }
+
+    /********************************************************************
+     * 4. MULTI-MODE ALARM SYNTHESIZER, VOICE TTS & FLASHLIGHT STROBE
+     ********************************************************************/
+    function ensureAudioContext() {
+      if (!state.audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        state.audioCtx = new AudioContextClass();
+      }
+      if (state.audioCtx.state === 'suspended') {
+        state.audioCtx.resume();
+      }
+    }
+
+    function toggleArmMonitor() {
+      ensureAudioContext();
+      requestWakeLock();
+
+      state.isArmed = !state.isArmed;
+      state.consecutiveHits = 0;
+      state.blackoutHits = 0;
+
+      const armBtn = document.getElementById('armBtn');
+      const armBtnText = document.getElementById('armBtnText');
+      const stateBadge = document.getElementById('stateBadge');
+      const statusDot = document.getElementById('statusDot');
+      const subStatusText = document.getElementById('subStatusText');
+
+      if (state.isArmed) {
+        recaptureBaseline();
+        if (document.getElementById('clapSnoozeToggle').checked) {
+          initClapMicrophone();
+        }
+        armBtn.className = 'col-span-2 py-3 px-4 rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-[0_0_20px_rgba(245,158,11,0.3)] transition';
+        armBtnText.textContent = 'ARMED — TAP TO DISARM';
+        stateBadge.textContent = 'ARMED';
+        stateBadge.className = 'text-[10px] mono font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        statusDot.className = 'w-3 h-3 rounded-full bg-cyan-400 animate-ping';
+        subStatusText.textContent = `Watching [${state.roiLabel}] at 4 FPS...`;
+        lockCameraExposure(true);
+        setTimeout(recaptureBaseline, 800);
+        if ('vibrate' in navigator) navigator.vibrate(40);
+        state.wdStale = 0;
+        state.wdLastTime = -1;
+        depthTimer = 0;
+        scheduleChargerCheck();
+        roiBox.classList.add('roi-armed');
+      } else {
+        stopSirenAndVibration();
+        armBtn.className = 'col-span-2 py-3 px-4 rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 bg-cyan-400 hover:bg-cyan-300 text-zinc-950 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition';
+        armBtnText.textContent = 'LOCK & ARM MONITOR';
+        stateBadge.textContent = 'STANDBY';
+        stateBadge.className = 'text-[10px] mono font-bold uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700';
+        statusDot.className = 'w-3 h-3 rounded-full bg-zinc-500';
+        subStatusText.textContent = '100% Offline Local Screen Watcher';
+        roiBox.classList.remove('roi-armed', 'roi-triggered');
+        lockCameraExposure(false);
+        state.faults = {};
+        renderFaults();
+        state.isBlackoutAlert = false;
+        document.getElementById('blackoutModal').classList.add('hidden');
+      }
+    }
+
+    function playSingleAlarmCycle(mode, toggleFlag) {
+      if (state.sirenMuted) return;
+      if (mode === 'voice') {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(`Alert! ${state.roiLabel} changed!`);
+          utter.rate = 1.05;
+          utter.pitch = 1.1;
+          window.speechSynthesis.speak(utter);
+        }
+        return;
+      }
+
+      if (!state.audioCtx) return;
+      const now = state.audioCtx.currentTime;
+      const osc = state.audioCtx.createOscillator();
+      const gain = state.audioCtx.createGain();
+
+      if (mode === 'police') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(toggleFlag ? 1420 : 860, now);
+        osc.frequency.linearRampToValueAtTime(toggleFlag ? 860 : 1420, now + 0.32);
+        gain.gain.setValueAtTime(0.38, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.34);
+        osc.connect(gain);
+        gain.connect(getAlarmMaster());
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else if (mode === 'beep') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(2400, now);
+        gain.gain.setValueAtTime(0.32, now);
+        gain.gain.setValueAtTime(0.001, now + 0.12);
+        gain.gain.setValueAtTime(0.32, now + 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+        osc.connect(gain);
+        gain.connect(getAlarmMaster());
+        osc.start(now);
+        osc.stop(now + 0.34);
+      } else if (mode === 'sonar') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1150, now);
+        osc.frequency.exponentialRampToValueAtTime(420, now + 0.55);
+        gain.gain.setValueAtTime(0.45, now);
+        gain.gain.exponentialRampToValueAtTime(0.005, now + 0.58);
+        osc.connect(gain);
+        gain.connect(getAlarmMaster());
+        osc.start(now);
+        osc.stop(now + 0.60);
+      }
+    }
+
+    function startSirenAndVibration() {
+      ensureAudioContext();
+      stopSirenAndVibration();
+
+      const mode = state.modeOverride || document.getElementById('soundModeSelect').value;
+      let toggleFlag = true;
+      const intervalMs = mode === 'voice' ? 3600 : mode === 'sonar' ? 850 : 380;
+
+      playSingleAlarmCycle(mode, toggleFlag);
+      state.sirenInterval = setInterval(() => {
+        toggleFlag = !toggleFlag;
+        playSingleAlarmCycle(mode, toggleFlag);
+      }, intervalMs);
+
+      if ('vibrate' in navigator) {
+        navigator.vibrate([500, 200, 500, 200]);
+        state.vibrationInterval = setInterval(() => {
+          navigator.vibrate([500, 200, 500, 200]);
+        }, 1600);
+      }
+
+      startTorchStrobe();
+
+      if (!state.isAlarming) { // Test button uses the same loudness
+        const tm = getAlarmMaster();
+        tm.gain.cancelScheduledValues(state.audioCtx.currentTime);
+        tm.gain.setValueAtTime(loudMax() ? 2.4 : 1, state.audioCtx.currentTime);
+      }
+
+      // Gentle-to-loud ramp, then escalate to full siren if nobody responds within 60 s
+      if (state.isAlarming) {
+        if (!state.escalated) state.alarmStart = Date.now();
+        const m = getAlarmMaster();
+        m.gain.cancelScheduledValues(state.audioCtx.currentTime);
+        m.gain.setValueAtTime(loudMax() ? 2.4 : (state.escalated ? 1.6 : 0.4), state.audioCtx.currentTime);
+        const startedAt = state.alarmStart;
+        state.escTimer = setInterval(() => {
+          const el = Date.now() - startedAt;
+          const target = loudMax() ? 2.4 : (state.escalated ? 1.6 : Math.min(1, 0.4 + 0.6 * el / 15000));
+          m.gain.setTargetAtTime(target, state.audioCtx.currentTime, 0.15);
+          if (!state.escalated && el >= 60000) {
+            state.escalated = true;
+            state.modeOverride = 'police';
+            const d = document.getElementById('alarmDetailText');
+            if (!d.textContent.includes('Escalated')) d.textContent += ' Escalated: no response for 60 s.';
+            startSirenAndVibration();
+          }
+        }, 500);
+      }
+
+      // Short silent gaps so the mic can hear a clap over the siren (it otherwise hears itself)
+      if (state.isAlarming) {
+        state.gapTimer = setInterval(() => {
+          state.sirenMuted = true;
+          state.mutedAt = Date.now();
+          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+          setTimeout(() => { state.sirenMuted = false; }, mode === 'voice' ? 1300 : 750);
+        }, mode === 'voice' ? 6500 : 2400);
+      }
+    }
+
+    function stopSirenAndVibration() {
+      clearInterval(state.escTimer);
+      state.escTimer = null;
+      if (state.master && state.audioCtx) {
+        state.master.gain.cancelScheduledValues(state.audioCtx.currentTime);
+        state.master.gain.setValueAtTime(1, state.audioCtx.currentTime);
+      }
+      clearInterval(state.gapTimer);
+      state.gapTimer = null;
+      state.sirenMuted = false;
+      if (state.sirenInterval) {
+        clearInterval(state.sirenInterval);
+        state.sirenInterval = null;
+      }
+      if (state.vibrationInterval) {
+        clearInterval(state.vibrationInterval);
+        state.vibrationInterval = null;
+      }
+      if ('vibrate' in navigator) {
+        navigator.vibrate(0);
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      stopTorchStrobe();
+    }
+
+    function playGentleWarningChime() {
+      ensureAudioContext();
+      if (!state.audioCtx) return;
+      const now = state.audioCtx.currentTime;
+      const osc = state.audioCtx.createOscillator();
+      const gain = state.audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880, now + 0.18); // A5
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.005, now + 0.45);
+      osc.connect(gain);
+      gain.connect(getAlarmMaster());
+      osc.start(now);
+      osc.stop(now + 0.48);
+    }
+
+    function toggleTestSiren() {
+      const btn = document.getElementById('testSirenBtn');
+      state.isTestSiren = !state.isTestSiren;
+      if (state.isTestSiren) {
+        startSirenAndVibration();
+        btn.className = 'py-3 px-3 rounded-xl font-bold text-xs bg-red-600 text-white border border-red-400 flex flex-col items-center justify-center leading-tight';
+        btn.innerHTML = '<span>🔇 Stop</span><span class="text-[10px] text-red-100 font-normal">Testing...</span>';
+      } else {
+        stopSirenAndVibration();
+        btn.className = 'py-3 px-3 rounded-xl font-bold text-xs bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 flex flex-col items-center justify-center leading-tight';
+        btn.innerHTML = '<span>🔊 Test</span><span class="text-[10px] text-zinc-400 font-normal">Alarm/Torch</span>';
+      }
+    }
+
+    function captureHighResRoiDataUrl() {
+      const snapCanvas = document.createElement('canvas');
+      snapCanvas.width = 320;
+      snapCanvas.height = 160;
+      const ctx = snapCanvas.getContext('2d');
+
+      if (video.videoWidth && video.videoHeight) {
+        const { sx, sy, sw, sh } = roiSourceRect();
+
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, snapCanvas.width, snapCanvas.height);
+      }
+      return snapCanvas.toDataURL('image/jpeg', 0.9);
+    }
+
+    function triggerEmergencyAlarm(diffPct) {
+      state.isAlarming = true;
+      state.escalated = false;
+      state.modeOverride = null;
+      state.clapSpikes = 0;
+      toggleStealthMode(false);
+      roiBox.classList.add('roi-triggered');
+
+      const nowStr = new Date().toLocaleTimeString();
+      const snapshotUrl = captureHighResRoiDataUrl();
+
+      document.getElementById('alarmTimeText').textContent = nowStr;
+      document.getElementById('alarmTitleBanner').textContent = `${state.roiLabel} CHANGED!`;
+      document.getElementById('alarmDetailText').textContent =
+        `ROI Pixel Shift: ${diffPct.toFixed(1)}% (Threshold: ${state.thresholdPct}%)`;
+      document.getElementById('alarmSnapshotImg').src = snapshotUrl;
+      document.getElementById('alarmModal').classList.remove('hidden');
+
+      if (state.isTestSiren) toggleTestSiren();
+      startSirenAndVibration();
+      appendEventLog(nowStr, diffPct, snapshotUrl, 'TRIGGER');
+    }
+
+    function triggerBlackoutWarning() {
+      state.isBlackoutAlert = true;
+      toggleStealthMode(false);
+      const nowStr = new Date().toLocaleTimeString();
+      document.getElementById('blackoutTimeText').textContent = nowStr;
+      document.getElementById('blackoutDetailText').textContent =
+        `Average ROI luminance fell to ${state.currentLum}/255 (cutoff: ${state.blackoutCutoff}). Check if your laptop display turned off or locked.`;
+      document.getElementById('blackoutModal').classList.remove('hidden');
+
+      playGentleWarningChime();
+      state.sirenInterval = setInterval(playGentleWarningChime, 2200);
+    }
+
+    function dismissBlackoutAlert() {
+      stopSirenAndVibration();
+      state.isBlackoutAlert = false;
+      state.blackoutHits = 0;
+      recaptureBaseline();
+      document.getElementById('blackoutModal').classList.add('hidden');
+    }
+
+    function acknowledgeAndReArm() {
+      state.escalated = false;
+      state.modeOverride = null;
+      stopSirenAndVibration();
+      state.isAlarming = false;
+      state.consecutiveHits = 0;
+      state.clapSpikes = 0;
+      recaptureBaseline();
+      // Re-baselining happens BEFORE holdOffUntil is pushed out below, so only the
+      // delayed snapshot decides when a fresh change may trigger again.
+      setTimeout(recaptureBaseline, 1500);
+      state.holdOffUntil = Date.now() + 2000;
+      roiBox.classList.remove('roi-triggered');
+      document.getElementById('alarmModal').classList.add('hidden');
+      // The alarm overrode the user's sound choice; restore it for the next trigger.
+      const applyMode = () => {
+        const sel = document.getElementById('soundModeSelect');
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('roi_night_monitor_prefs') || '{}').soundMode; } catch (e) {}
+        if (saved) sel.value = saved;
+      };
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      applyMode();
+    }
+
+    function disarmFromAlarm() {
+      state.escalated = false;
+      state.modeOverride = null;
+      stopSirenAndVibration();
+      state.isAlarming = false;
+      document.getElementById('alarmModal').classList.add('hidden');
+      roiBox.classList.remove('roi-triggered');
+      if (state.isArmed) toggleArmMonitor();
+    }
+
+    /********************************************************************
+     * 5. CLAP / LOUD SHOUT REMOTE AUDIO SNOOZE & RE-ARM
+     ********************************************************************/
+    async function initClapMicrophone() {
+      if (state.micStream) return;
+      try {
+        ensureAudioContext();
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Microphone API unavailable');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
+        state.micStream = stream;
+        const source = state.audioCtx.createMediaStreamSource(stream);
+        const analyser = state.audioCtx.createAnalyser();
+        analyser.fftSize = 2048; // 46 ms window; old 256 saw only 6 ms of every 90 ms
+        source.connect(analyser);
+        state.micAnalyser = analyser;
+
+        const dataArray = new Uint8Array(analyser.fftSize);
+        clearInterval(state.micTimer);
+        state.micTimer = setInterval(() => {
+          if (!state.micAnalyser || !document.getElementById('clapSnoozeToggle').checked) return;
+          try {
+            state.micAnalyser.getByteTimeDomainData(dataArray);
+          } catch (err) {
+            // AudioContext was closed/suspended: drop the dead graph so it can be rebuilt.
+            clearInterval(state.micTimer);
+            state.micTimer = null;
+            state.micAnalyser = null;
+            return;
+          }
+          let maxPeak = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            const amp = Math.abs(dataArray[i] - 128);
+            if (amp > maxPeak) maxPeak = amp;
+          }
+          const pct = Math.min(100, Math.round((maxPeak / 128) * 100));
+          document.getElementById('micLevelVal').textContent = pct + '%';
+
+          // Detect sharp acoustic spike (clap or loud shout > 72% peak)
+          const now = Date.now();
+          const listening = !state.isAlarming || (state.sirenMuted && now - state.mutedAt > 150);
+          const thr = Math.min(75, Math.max(38, state.micFloor * 3.5)); // adapts to room noise
+          if (pct < thr * 0.6) state.micFloor = state.micFloor * 0.98 + pct * 0.02;
+          if (listening && pct >= thr && now - state.lastClapTime > 280) {
+            state.lastClapTime = now;
+            state.clapSpikes++;
+            document.getElementById('clapCountVal').textContent = `${state.clapSpikes}/2`;
+
+            if (state.isAlarming && state.clapSpikes >= 2) {
+              acknowledgeAndReArm();
+            }
+            setTimeout(() => {
+              if (Date.now() - state.lastClapTime >= 3400) {
+                state.clapSpikes = 0;
+                document.getElementById('clapCountVal').textContent = '0/2';
+              }
+            }, 3500);
+          }
+        }, 40);
+      } catch (e) {
+        document.getElementById('micLevelVal').textContent = 'Mic Denied';
+        state.micDenied = true;
+      }
+    }
+
+    function toggleClapListener(enabled) {
+      if (enabled) {
+        state.micDenied = false;   // explicit user action may re-request permission
+        initClapMicrophone();
+      } else {
+        clearInterval(state.micTimer);
+        state.micTimer = null;
+        state.micAnalyser = null;
+        if (state.micStream) {
+          state.micStream.getTracks().forEach(t => t.stop());
+          state.micStream = null;
+        }
+        document.getElementById('micLevelVal').textContent = '0%';
+        document.getElementById('clapCountVal').textContent = '0/2';
+        state.clapSpikes = 0;
+      }
+      saveLocalPrefs();
+    }
+
+    /********************************************************************
+     * 6. WAKE LOCK, LIVE BATTERY TELEMETRY & STEALTH OLED MODE
+     ********************************************************************/
+    async function initBatteryMonitor() {
+      if (!('getBattery' in navigator)) return;
+      try {
+        const batt = await navigator.getBattery();
+        const updateBatt = () => {
+          state.batteryPct = Math.round(batt.level * 100);
+          state.batteryCharging = Boolean(batt.charging);
+          scheduleChargerCheck();
+          const el = document.getElementById('hudBattVal');
+          el.textContent = `${state.batteryPct}%${batt.charging ? '⚡' : ''}`;
+          el.className = state.batteryPct <= 20 && !batt.charging
+            ? 'text-red-400 font-bold'
+            : 'text-emerald-400 font-bold';
+
+          // Gentle low battery warning chime if unplugged below 15%
+          if (state.batteryPct <= 15 && !batt.charging && !state.lowBattWarned) {
+            state.lowBattWarned = true;
+            playGentleWarningChime();
+          }
+        };
+        updateBatt();
+        batt.addEventListener('levelchange', updateBatt);
+        batt.addEventListener('chargingchange', updateBatt);
+      } catch (e) {}
+    }
+
+    async function requestWakeLock() {
+      const wakeText = document.getElementById('wakeText');
+      const wakeIcon = document.getElementById('wakeIcon');
+      const wakeBtn = document.getElementById('wakeLockBtn');
+
+      if (!('wakeLock' in navigator)) {
+        wakeText.textContent = 'No API';
+        return;
+      }
+      try {
+        state.wakeLock = await navigator.wakeLock.request('screen');
+        wakeIcon.textContent = '⚡';
+        wakeText.textContent = 'Awake';
+        wakeBtn.className = 'flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-cyan-950/60 border border-cyan-700/60 text-cyan-300';
+
+        state.wakeLock.addEventListener('release', () => {
+          state.wakeLock = null;
+          wakeIcon.textContent = '🌙';
+          wakeText.textContent = 'Sleep OK';
+          if (state.isArmed && document.visibilityState === 'visible') setTimeout(requestWakeLock, 2000);
+          wakeBtn.className = 'flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-zinc-900 border border-zinc-800 text-zinc-400';
+        });
+      } catch (e) {
+        wakeText.textContent = 'Tap Lock';
+      }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && state.isArmed) {
+        requestWakeLock();
+        video.play().catch(() => {});
+      }
+    });
+
+    function toggleStealthMode(enable) {
+      const overlay = document.getElementById('stealthOverlay');
+      if (enable) {
+        requestWakeLock();
+        overlay.classList.remove('hidden');
+      } else {
+        overlay.classList.add('hidden');
+      }
+    }
+
+    /********************************************************************
+     * 7. LOCAL PREFERENCES & TRIGGER SNAPSHOT LOG
+     ********************************************************************/
+    function saveLocalPrefs() {
+      const prefs = {
+        roiLabel: state.roiLabel,
+        thresholdPct: state.thresholdPct,
+        confirmRequired: state.confirmRequired,
+        blackoutCutoff: state.blackoutCutoff,
+        soundMode: document.getElementById('soundModeSelect').value,
+        torchStrobe: document.getElementById('torchStrobeToggle').checked,
+        blackoutGuard: document.getElementById('blackoutGuardToggle').checked
+      };
+      try {
+        localStorage.setItem('roi_night_monitor_prefs', JSON.stringify(prefs));
+      } catch (e) {}
+    }
+
+    function loadLocalPrefs() {
+      try {
+        const raw = localStorage.getItem('roi_night_monitor_prefs');
+        if (!raw) return;
+        const prefs = JSON.parse(raw);
+        if (prefs.roiLabel) {
+          document.getElementById('roiNameInput').value = prefs.roiLabel;
+          updateRoiLabel(prefs.roiLabel);
+        }
+        if (prefs.thresholdPct) {
+          document.getElementById('thresholdSlider').value = prefs.thresholdPct;
+          updateThreshold(prefs.thresholdPct);
+        }
+        if (prefs.confirmRequired) {
+          document.getElementById('confirmSlider').value = prefs.confirmRequired;
+          updateConfirmChecks(prefs.confirmRequired);
+        }
+        if (prefs.blackoutCutoff) {
+          document.getElementById('blackoutSlider').value = prefs.blackoutCutoff;
+          updateBlackoutCutoff(prefs.blackoutCutoff);
+        }
+        if (prefs.soundMode) {
+          document.getElementById('soundModeSelect').value = prefs.soundMode;
+        }
+        if (typeof prefs.torchStrobe === 'boolean') {
+          document.getElementById('torchStrobeToggle').checked = prefs.torchStrobe;
+        }
+        if (typeof prefs.blackoutGuard === 'boolean') {
+          document.getElementById('blackoutGuardToggle').checked = prefs.blackoutGuard;
+        }
+      } catch (e) {}
+    }
+
+    function appendEventLog(timeStr, diffPct, snapshotUrl, tag) {
+      const list = document.getElementById('eventLogList');
+      const emptyMsg = document.getElementById('emptyLogMsg');
+      if (emptyMsg) emptyMsg.remove();
+
+      state.triggerCount++;
+      document.getElementById('logCountBadge').textContent = state.triggerCount;
+
+      const item = document.createElement('div');
+      item.className = 'flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-lg p-2';
+
+      // Build with textContent: a user-typed ROI label must never be parsed as HTML.
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-2.5';
+
+      const img = document.createElement('img');
+      img.src = snapshotUrl;
+      img.className = 'w-16 h-9 object-contain rounded bg-black border border-zinc-800';
+      img.alt = 'ROI Snapshot';
+      left.appendChild(img);
+
+      const meta = document.createElement('div');
+      const timeEl = document.createElement('p');
+      timeEl.className = 'text-xs font-bold text-red-400 mono';
+      timeEl.textContent = `🚨 ${timeStr}`;
+      const shiftEl = document.createElement('p');
+      shiftEl.className = 'text-[10px] text-zinc-400';
+      shiftEl.textContent = 'Pixel Shift: ';
+      const shiftVal = document.createElement('span');
+      shiftVal.className = 'text-zinc-200 font-semibold';
+      shiftVal.textContent = `${diffPct.toFixed(1)}%`;
+      shiftEl.appendChild(shiftVal);
+      meta.append(timeEl, shiftEl);
+      left.appendChild(meta);
+
+      const tagEl = document.createElement('span');
+      tagEl.className = 'text-[10px] mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800';
+      tagEl.textContent = state.roiLabel;
+
+      item.append(left, tagEl);
+      list.prepend(item);
+    }
+
+    function clearEventLog() {
+      state.triggerCount = 0;
+      document.getElementById('logCountBadge').textContent = '0';
+      const list = document.getElementById('eventLogList');
+      list.innerHTML = '<p id="emptyLogMsg" class="text-xs text-zinc-500 italic py-2 text-center">No triggers recorded this shift.</p>';
+    }
+
+    /********************************************************************
+     * 8. FAULT BANNER, CAMERA WATCHDOG, SAVED SETUP & AUTO RE-ARM
+     ********************************************************************/
+    function scheduleChargerCheck() {
+      clearTimeout(state.chargerTimer);
+      const on = document.getElementById('chargerAlertToggle').checked;
+      if (!on || !state.isArmed || state.batteryPct === null || state.batteryCharging) { clearFault('charger'); return; }
+      state.chargerTimer = setTimeout(() => {
+        if (state.isArmed && !state.batteryCharging && document.getElementById('chargerAlertToggle').checked)
+          setFault('charger', `Phone is not charging (battery ${state.batteryPct}%). Check the cable.`);
+      }, 10000);
+    }
+
+    function loudMax() { return document.getElementById('loudnessSelect').value !== 'ramp'; }
+    try { const v = localStorage.getItem('roi_loudness'); if (v) document.getElementById('loudnessSelect').value = v; } catch (e) {}
+
+    function getAlarmMaster() {
+      ensureAudioContext();
+      if (!state.master) {
+        state.master = state.audioCtx.createGain();
+        state.master.connect(state.audioCtx.destination);
+      }
+      return state.master;
+    }
+
+    function setFault(key, text, chime = true) {
+      const f = state.faults[key];
+      if (f) f.text = text; else state.faults[key] = { text, chime, acked: false };
+      renderFaults();
+    }
+    function clearFault(key) {
+      if (state.faults[key]) { delete state.faults[key]; renderFaults(); }
+    }
+    function ackFaults() {
+      Object.values(state.faults).forEach(f => { f.acked = true; });
+      renderFaults();
+    }
+    function renderFaults() {
+      const b = document.getElementById('faultBanner');
+      const list = Object.values(state.faults);
+      const needChime = list.some(f => f.chime && !f.acked);
+      b.classList.toggle('hidden', list.length === 0);
+      b.textContent = list.map(f => f.text).join(' / ') + (needChime ? ' Tap to silence.' : '');
+      if (needChime && !state.faultTimer) {
+        if (!state.isAlarming) playGentleWarningChime();
+        state.faultTimer = setInterval(() => { if (!state.isAlarming) playGentleWarningChime(); }, 4000);
+      } else if (!needChime && state.faultTimer) {
+        clearInterval(state.faultTimer);
+        state.faultTimer = null;
+      }
+    }
+
+    // Watchdog: camera stream dead/frozen, or alarm audio blocked by the browser
+    function watchdogTick() {
+      if (!state.isArmed) return;
+      if (video.paused && state.stream) video.play().catch(() => {});
+      if (state.micStream && state.micStream.getTracks().some(t => t.readyState === 'ended')) {
+        state.micStream = null;
+        // A denied mic must not be re-prompted every 5 s; the user can re-enable it manually.
+        if (document.getElementById('clapSnoozeToggle').checked && !state.micDenied) initClapMicrophone();
+      }
+      const t = state.videoTrack;
+      const dead = !t || t.readyState !== 'live';
+      const frozen = !dead && video.currentTime === state.wdLastTime;
+      state.wdLastTime = video.currentTime;
+      if (dead || frozen) state.wdStale++;
+      else { state.wdStale = 0; clearFault('camera'); }
+      if (state.wdStale === 2) initCamera();            // first try a silent restart
+      if (state.wdStale >= 4) setFault('camera', 'Camera feed stopped. Monitoring is not working. Check the phone.');
+      if (state.audioCtx && state.audioCtx.state !== 'running') {
+        state.audioCtx.resume().catch(() => {});
+        setFault('audio', 'Alarm sound is blocked. Tap anywhere on the screen to enable it.', false);
+      } else {
+        clearFault('audio');
+      }
+    }
+    setInterval(watchdogTick, 5000);
+    ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => {
+      if (state.audioCtx && state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
+    }, { passive: true }));
+
+    // Saved setup: ROI box, zoom and armed state survive reloads and crashes
+    function saveSetup() {
+      if (!state.persistReady) return;
+      try {
+        localStorage.setItem('roi_night_monitor_setup', JSON.stringify({
+          roi: state.roi, zoom: state.zoomLevel, armed: state.isArmed
+        }));
+      } catch (e) {}
+    }
+    function loadSetup() {
+      try {
+        const raw = localStorage.getItem('roi_night_monitor_setup');
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        const r = d.roi;
+        if (r && [r.x, r.y, r.w, r.h].every(v => typeof v === 'number' && v >= 0 && v <= 1)) {
+          state.roi = { x: r.x, y: r.y, w: r.w, h: r.h };
+          syncRoiUI();
+        }
+        if (d.zoom > 1) state.savedZoom = d.zoom;
+        state.resumeArm = d.armed === true;
+      } catch (e) {}
+    }
+    function afterCameraReady() {
+      const z = state.savedZoom || (state.zoomLevel > 1 ? state.zoomLevel : null);
+      state.savedZoom = null;
+      if (z) {
+        document.getElementById('zoomSlider').value = z;
+        handleZoomChange(z);
+      }
+      if (state.isArmed) lockCameraExposure(true);
+      if (state.resumeArm) {
+        state.resumeArm = false;
+        setTimeout(() => {
+          if (!state.isArmed) {
+            toggleArmMonitor();
+            document.getElementById('subStatusText').textContent = `Resumed after reload. Watching [${state.roiLabel}]...`;
+          }
+          state.persistReady = true;
+        }, 1200);
+      } else {
+        state.persistReady = true;
+      }
+    }
+    setInterval(saveSetup, 2000);
+    window.addEventListener('pagehide', saveSetup);
+
+    // Boot on load
+    window.addEventListener('DOMContentLoaded', () => {
+      syncRoiUI();
+      loadLocalPrefs();
+      loadSetup();
+      initBatteryMonitor();
+      initCamera();
+      // A service worker needs a real origin; opening the file via file:// throws here.
+      if (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker not registered:', err.message));
+        }
+      }
+    });
+
+    // Never leave the page reporting a healthy state after an unexpected promise rejection.
+    window.addEventListener('unhandledrejection', ev => {
+      console.warn('Unhandled promise rejection:', ev.reason);
+    });  </script>
+</body>
+</html>
